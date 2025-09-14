@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-const GEMINI_API_KEY = "AIzaSyDSIgIkI2Xe3cL_iyiUDttsORjN_1LbLZs"
+// IMPORTANT: Replace with your actual Gemini API Key
+// You should move this to a .env.local file to keep it secure
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,48 +12,58 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Missing required data" }, { status: 400 })
     }
 
-    const prompt = `Based on the following data, provide a very brief summary (max 25 words) and one practical tip (max 15 words) for a farmer:
+    const prompt = `You are an expert agricultural AI assistant for farmers in Kerala, India. Your goal is to provide a highly relevant, concise, and actionable summary based on the provided real-time data.
 
 Location: ${location}
 Crop: ${cropType}
-Weather: ${weather.current.temp_c}°C, ${weather.current.condition.text}
+Current Weather: ${weather.current.temp_c}°C, ${weather.current.condition.text}
 Humidity: ${weather.current.humidity}%
 Wind: ${weather.current.wind_kph} km/h
+Today's Forecast:
+  - Max Temp: ${weather.forecast.forecastday[0].day.maxtemp_c}°C
+  - Min Temp: ${weather.forecast.forecastday[0].day.mintemp_c}°C
+  - Chance of Rain: ${weather.forecast.forecastday[0].day.daily_chance_of_rain}%
+  - Total Precipitation: ${weather.forecast.forecastday[0].day.totalprecip_mm} mm
 
-Format your response as JSON:
+Generate a JSON object with two key fields: "summary" and "tip".
+
+1.  **"summary" (max 30 words):**
+    - Briefly describe the current weather's impact on the specified crop.
+    - Mention any immediate opportunities or threats.
+    - Example: "Warm, humid weather is good for rice growth, but increases fungal risk."
+
+2.  **"tip" (max 20 words):**
+    - Provide one highly practical and actionable tip directly related to the summary.
+    - Be specific. Instead of "monitor pests", say "Check for leaf folder pests due to high humidity."
+    - Example: "Scout for sheath blight and consider a preventive fungicide application."
+
+Output Format (JSON only):
 {
-  "summary": "Brief weather and crop status summary",
-  "tip": "One actionable farming tip"
+  "summary": "...",
+  "tip": "..."
 }`
 
     const response = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest?key=${GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-goog-api-key": GEMINI_API_KEY,
         },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
+          contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 150,
+            responseMimeType: "application/json",
           },
         }),
       },
     )
 
     if (!response.ok) {
-      throw new Error(`Gemini API error: ${response.status}`)
+      const errorText = await response.text()
+      throw new Error(`Gemini API error: ${response.status} ${errorText}`)
     }
 
     const data = await response.json()
@@ -60,34 +72,19 @@ Format your response as JSON:
     if (!generatedText) {
       throw new Error("No response from Gemini API")
     }
-
-    // Try to parse JSON from the response
-    let parsedResponse
-    try {
-      // Extract JSON from the response (in case it's wrapped in markdown)
-      const jsonMatch = generatedText.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        parsedResponse = JSON.parse(jsonMatch[0])
-      } else {
-        throw new Error("No JSON found in response")
-      }
-    } catch (parseError) {
-      // Fallback if JSON parsing fails
-      parsedResponse = {
-        summary: "Current conditions are suitable for farming activities.",
-        tip: "Monitor weather changes regularly.",
-      }
-    }
-
+    
+    const parsedResponse = JSON.parse(generatedText)
     return NextResponse.json(parsedResponse)
+
   } catch (error) {
     console.error("Error generating quick summary:", error)
+    // Providing a more informative fallback
     return NextResponse.json(
       {
-        summary: "Weather data available for your location.",
-        tip: "Check conditions before field work.",
+        summary: "Could not generate AI summary. The service may be temporarily unavailable.",
+        tip: "Please rely on the standard weather and crop data for now.",
       },
-      { status: 200 },
+      { status: 500 },
     )
   }
 }
